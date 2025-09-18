@@ -1,1 +1,154 @@
-<!-- dashboard placeholder -->
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>ESP32-CAM Dashboard</title>
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+  <header class="topbar">
+    <h1>ESP32-CAM Dashboard</h1>
+    <div class="info">Auto-save when weight ≥ 60 kg — Live & History</div>
+  </header>
+
+  <main class="container">
+    <section class="controls">
+      <button id="refreshBtn">Refresh</button>
+      <label><input type="checkbox" id="showNewest" checked> Show newest first</label>
+    </section>
+
+    <section class="live">
+      <h2>Live Camera</h2>
+      <div class="live-left">
+        <div id="liveContainer" class="liveContainer">
+          <p class="empty">No live stream detected. Refresh after ESP connects.</p>
+        </div>
+      </div>
+      <div class="live-right">
+        <h3>Latest weight</h3>
+        <div id="latestWeight" class="metric">—</div>
+        <h3>Last update</h3>
+        <div id="lastUpdate" class="metric">—</div>
+        <button id="openStreamBtn" class="btn" style="display:none">Open stream in new tab</button>
+      </div>
+    </section>
+
+    <section id="gallery" class="gallery">
+      <!-- thumbnails injected here -->
+    </section>
+
+    <div id="modal" class="modal" aria-hidden="true">
+      <div class="modal-inner">
+        <button id="closeModal" class="close">×</button>
+        <img id="modalImg" src="" alt="full image">
+        <p id="modalMeta"></p>
+        <a id="downloadBtn" href="#" download class="btn">Download</a>
+      </div>
+    </div>
+  </main>
+
+<script>
+const listUrl = 'list_uploads.php';
+const refreshBtn = document.getElementById('refreshBtn');
+const liveContainer = document.getElementById('liveContainer');
+const latestWeightEl = document.getElementById('latestWeight');
+const lastUpdateEl = document.getElementById('lastUpdate');
+const openStreamBtn = document.getElementById('openStreamBtn');
+
+async function fetchList(){
+  try {
+    const res = await fetch(listUrl + '?t=' + Date.now());
+    if(!res.ok) throw new Error('Failed to fetch');
+    const data = await res.json();
+    return data;
+  } catch(e){
+    console.error(e);
+    return [];
+  }
+}
+
+function renderList(items){
+  const gallery = document.getElementById('gallery');
+  gallery.innerHTML = '';
+  if(items.length === 0){
+    gallery.innerHTML = '<p class="empty">No images found.</p>';
+    return;
+  }
+  items.forEach(item => {
+    const card = document.createElement('figure');
+    card.className = 'thumb';
+    const img = document.createElement('img');
+    img.src = item.url;
+    img.alt = item.name;
+    img.loading = 'lazy';
+    img.addEventListener('click', () => openModal(item));
+    const cap = document.createElement('figcaption');
+    let meta = item.name + ' • ' + (new Date(item.mtime*1000)).toLocaleString();
+    if(item.weight !== null) meta += ' • ' + item.weight + ' kg';
+    cap.innerText = meta;
+    card.appendChild(img);
+    card.appendChild(cap);
+    gallery.appendChild(card);
+  });
+}
+
+function openModal(item){
+  const modal = document.getElementById('modal');
+  document.getElementById('modalImg').src = item.url;
+  document.getElementById('modalMeta').innerText = item.name + ' • ' + (new Date(item.mtime*1000)).toLocaleString() + (item.weight !== null ? (' • ' + item.weight + ' kg') : '');
+  document.getElementById('downloadBtn').href = item.url;
+  modal.style.display = 'flex';
+  modal.setAttribute('aria-hidden', 'false');
+}
+
+function closeModal(){
+  const modal = document.getElementById('modal');
+  modal.style.display = 'none';
+  modal.setAttribute('aria-hidden', 'true');
+  document.getElementById('modalImg').src = '';
+}
+
+refreshBtn.addEventListener('click', loadAndRender);
+document.getElementById('closeModal').addEventListener('click', closeModal);
+
+async function loadAndRender(){
+  const items = await fetchList();
+  const newestFirst = document.getElementById('showNewest').checked;
+  items.sort((a,b) => newestFirst ? b.mtime - a.mtime : a.mtime - b.mtime);
+  renderList(items);
+  updateLive(items);
+}
+
+function updateLive(items){
+  if(items.length === 0){
+    liveContainer.innerHTML = '<p class="empty">No live stream detected. Refresh after ESP connects.</p>';
+    latestWeightEl.innerText = '—';
+    lastUpdateEl.innerText = '—';
+    openStreamBtn.style.display = 'none';
+    return;
+  }
+  // find latest entry that has a stream URL
+  const withStream = items.filter(i => i.stream && i.stream.length > 0);
+  let latest = withStream.length ? withStream[0] : null;
+  if(!latest && items.length) latest = items[0]; // fallback
+  if(latest && latest.stream){
+    // show iframe (MJPEG or stream)
+    liveContainer.innerHTML = '<iframe src="' + latest.stream + '" frameborder="0" sandbox="allow-scripts allow-same-origin" style="width:100%;height:360px;border-radius:8px;"></iframe>';
+    latestWeightEl.innerText = latest.weight !== null ? (latest.weight + ' kg') : '—';
+    lastUpdateEl.innerText = new Date(latest.mtime*1000).toLocaleString();
+    openStreamBtn.style.display = 'inline-block';
+    openStreamBtn.onclick = () => window.open(latest.stream, '_blank');
+  } else {
+    liveContainer.innerHTML = '<p class="empty">No live stream URL available. Ensure ESP is running camera server and not blocked by firewall.</p>';
+    latestWeightEl.innerText = '—';
+    lastUpdateEl.innerText = '—';
+    openStreamBtn.style.display = 'none';
+  }
+}
+
+// initial load
+loadAndRender();
+</script>
+</body>
+</html>
